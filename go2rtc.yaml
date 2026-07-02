@@ -1,0 +1,26 @@
+# ============================================================
+#  go2rtc 스트림 정의
+#  - 카메라 RTSP/USB 를 fan-out: 브라우저 라이브뷰 + 백엔드 녹화용 stream.mp4
+#  - 실제 RTSP CCTV 는 원본 h264 그대로 remux(무손실). 아래 cam_1 은 개발용 웹캠 대체.
+#  - stream 키(cam_1 ...)가 .env 의 CAMERAS 와 일치해야 한다.
+# ============================================================
+
+api:
+  listen: ":1984"
+
+# 방금 프로젝트 폴더에 받은 ffmpeg 를 사용
+ffmpeg:
+  bin: "C:\\Users\\User\\Desktop\\pipeline\\ffmpeg.exe"
+
+streams:
+  # --- 개발용 웹캠: Logitech HD Pro Webcam C920 (dshow) ---
+  # 라이브뷰가 우선이므로 h264 로 출력(소프트웨어 인코딩 = 어느 PC에서나 안정적).
+  # GPU(nvenc) 는 가끔 "지원되지 않는 인코딩(0x80004005)" 오류가 나서 #hardware 제거함.
+  # 실제 CCTV 는 아래 RTSP 예시처럼 원본 코덱 그대로 remux(재인코딩 X).
+  cam_1: ffmpeg:device?video=HD Pro Webcam C920&resolution=1280x720#video=h264
+
+  # --- 실제 RTSP CCTV (배포 시) : 원본 코덱 그대로, 재인코딩 없음 ---
+  # cam_1: rtsp://<user>:<pass>@<카메라IP>:554/stream
+
+  # 두 번째 카메라를 쓰면 아래 주석 해제 + .env CAMERAS=cam_1,cam_2
+  # cam_2: ffmpeg:device?video=<두번째장치명>&resolution=1280x720#video=h264

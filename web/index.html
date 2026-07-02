@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<!-- 역할: 라이브뷰(표시 전용) + 녹화 시작/중지 버튼 + 실시간 녹화 시간 표시. -->
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Recording Pipeline</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 24px; background: #111; color: #eee; }
+    h1 { font-size: 20px; }
+    #cams { display: flex; flex-wrap: wrap; gap: 16px; margin: 16px 0; }
+    .cam { position: relative; background: #000; border: 1px solid #333; border-radius: 8px; padding: 8px; }
+    .cam figcaption { font-size: 13px; color: #aaa; margin-top: 6px; }
+    video { width: 480px; max-width: 90vw; background: #000; display: block; }
+    button { font-size: 15px; padding: 10px 20px; border: 0; border-radius: 6px; cursor: pointer; }
+    #start { background: #2e7d32; color: #fff; }
+    #stop  { background: #c62828; color: #fff; }
+    button:disabled { opacity: .4; cursor: default; }
+    #state { margin-left: 12px; font-weight: 600; }
+    .rec { color: #ff5252; }
+
+    /* 오른쪽 상단 고정 REC 타이머 배지 */
+    #recBadge {
+      position: fixed; top: 16px; right: 20px; z-index: 1000;
+      display: none; align-items: center; gap: 10px;
+      background: rgba(198,40,40,.95); color: #fff;
+      padding: 10px 18px; border-radius: 999px;
+      font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums;
+      box-shadow: 0 4px 14px rgba(0,0,0,.5);
+    }
+    #recBadge.on { display: flex; }
+    #recBadge .dot {
+      width: 14px; height: 14px; border-radius: 50%; background: #fff;
+      animation: blink 1s steps(2, start) infinite;
+    }
+    @keyframes blink { 0%,50% { opacity: 1 } 50.01%,100% { opacity: .15 } }
+
+    /* 각 카메라 화면 위에 겹쳐 보이는 녹화 시간 */
+    .cam .rec-overlay {
+      position: absolute; top: 14px; left: 14px; display: none;
+      align-items: center; gap: 6px;
+      background: rgba(0,0,0,.6); color: #ff5252;
+      padding: 4px 10px; border-radius: 6px;
+      font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums;
+    }
+    .cam .rec-overlay.on { display: flex; }
+    .cam .rec-overlay .dot {
+      width: 10px; height: 10px; border-radius: 50%; background: #ff5252;
+      animation: blink 1s steps(2, start) infinite;
+    }
+  </style>
+</head>
+<body>
+  <!-- 오른쪽 상단 고정 타이머 -->
+  <div id="recBadge"><span class="dot"></span><span>REC</span><span id="recTime">00:00:00</span></div>
+
+  <h1>🎥 Recording Pipeline — 라이브뷰 / 녹화 제어</h1>
+
+  <div>
+    <button id="start">● 녹화 시작</button>
+    <button id="stop" disabled>■ 녹화 중지</button>
+    <span id="state">상태: 대기</span>
+  </div>
+
+  <div id="cams"></div>
+
+  <script>
+    // 백엔드(FastAPI) 주소. 같은 호스트에서 서빙되면 상대경로로 충분.
+    const API = location.origin.replace(/:\d+$/, ":8000");
+    // go2rtc 라이브뷰 스트림(브라우저 표시 전용). WebRTC 지원 페이지 사용.
+    const GO2RTC = "http://localhost:1984";
+
+    const startBtn = document.getElementById("start");
+    const stopBtn  = document.getElementById("stop");
+    const stateEl  = document.getElementById("state");
+    const camsEl   = document.getElementById("cams");
+    const recBadge = document.getElementById("recBadge");
+    const recTime  = document.getElementById("recTime");
+
+    // 서버가 알려준 녹화 시작 시각(ms). 녹화중이 아니면 null.
+    let recStartMs = null;
+
+    async function loadCameras() {
+      const r = await fetch(`${API}/cameras`);
+      const { cameras } = await r.json();
+      camsEl.innerHTML = "";
+      for (const id of cameras) {
+        const fig = document.createElement("figure");
+        fig.className = "cam";
+        // 카메라 화면 위에 겹쳐지는 녹화 시간 오버레이 + go2rtc WebRTC 뷰어
+        fig.innerHTML = `
+          <div class="rec-overlay"><span class="dot"></span><span class="t">00:00:00</span></div>
+          <iframe src="${GO2RTC}/webrtc.html?src=${id}"
+                  width="480" height="270" style="border:0;background:#000"
+                  allow="autoplay"></iframe>
+          <figcaption>${id}</figcaption>`;
+        camsEl.appendChild(fig);
+      }
+    }
+
+    // 초 → HH:MM:SS
+    function fmt(totalSec) {
+      const s = Math.max(0, Math.floor(totalSec));
+      const hh = String(Math.floor(s / 3600)).padStart(2, "0");
+      const mm = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
+      const ss = String(s % 60).padStart(2, "0");
+      return `${hh}:${mm}:${ss}`;
+    }
+
+    // 1초마다 경과 시간 갱신 (서버 시작 시각 기준으로 계산 → 새로고침해도 정확)
+    function tick() {
+      const on = recStartMs != null;
+      recBadge.classList.toggle("on", on);
+      document.querySelectorAll(".cam .rec-overlay")
+        .forEach(o => o.classList.toggle("on", on));
+      if (!on) return;
+      const text = fmt((Date.now() - recStartMs) / 1000);
+      recTime.textContent = text;
+      document.querySelectorAll(".cam .rec-overlay .t")
+        .forEach(t => t.textContent = text);
+    }
+    setInterval(tick, 250);  // 부드럽게 갱신(표시는 초 단위)
+
+    function setRecording(on, startedAt) {
+      startBtn.disabled = on;
+      stopBtn.disabled = !on;
+      // startedAt 은 서버 ISO 시각(예: "2026-07-02T12:36:13.04"). 같은 PC라 로컬시각으로 파싱.
+      recStartMs = on && startedAt ? new Date(startedAt).getTime() : null;
+      stateEl.innerHTML = on
+        ? `상태: <span class="rec">● 녹화중</span>`
+        : "상태: 대기";
+      tick();
+    }
+
+    // 압축 진행/결과를 상태줄에 반영 (녹화중이 아닐 때만)
+    function showArchive(a) {
+      if (!a) return;
+      if (a.state === "archiving")
+        stateEl.innerHTML = `상태: <span class="rec">⏳ 압축중…</span> (${a.folder})`;
+      else if (a.state === "done")
+        stateEl.innerHTML = `상태: ✅ 압축 완료 → <b>${a.zip}</b>`;
+      else if (a.state === "error")
+        stateEl.innerHTML = `상태: ⚠️ 압축 실패 (${a.folder})`;
+    }
+
+    async function refreshStatus() {
+      try {
+        const r = await fetch(`${API}/status`);
+        const s = await r.json();
+        setRecording(s.recording, s.start);
+        if (!s.recording) showArchive(s.archive);  // 대기중이면 최근 압축 상태 표시
+      } catch (e) { stateEl.textContent = "상태: 백엔드 연결 실패"; }
+    }
+
+    startBtn.onclick = async () => {
+      startBtn.disabled = true;
+      await fetch(`${API}/start`, { method: "POST" });
+      refreshStatus();
+    };
+    stopBtn.onclick = async () => {
+      stopBtn.disabled = true;
+      const r = await fetch(`${API}/stop`, { method: "POST" });
+      const j = await r.json();
+      recStartMs = null; tick();
+      stateEl.innerHTML = `상태: <span class="rec">⏳ 압축중…</span> (${j.folder ?? ""})`;
+      // 압축이 끝날 때까지 1초 간격으로 상태 확인
+      const poll = setInterval(async () => {
+        const s = await (await fetch(`${API}/status`)).json();
+        if (s.recording) { clearInterval(poll); return; }
+        showArchive(s.archive);
+        if (s.archive && s.archive.state !== "archiving") clearInterval(poll);
+      }, 1000);
+    };
+
+    loadCameras();
+    refreshStatus();
+    setInterval(refreshStatus, 5000);
+  </script>
+</body>
+</html>

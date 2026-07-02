@@ -1,0 +1,22 @@
+# --- 비밀값 / 개인키 (절대 커밋 금지) ---
+.env
+nas_*
+*.key
+*.pem
+**/.ssh/
+
+# --- 녹화물 / 로그 (용량·개인정보) ---
+recordings/
+logs/
+
+# --- 대용량 바이너리 (직접 내려받는 것, 저장소에 넣지 않음) ---
+go2rtc.exe
+ffmpeg.exe
+*.exe
+*.ovpn
+
+# --- Python ---
+__pycache__/
+*.pyc
+.venv/
+venv/
