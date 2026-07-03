@@ -102,9 +102,14 @@ def stop():
         for rec in STATE["recorders"].values():
             rec.stop()
         end_at = datetime.now()
+        # 카메라별 실제 첫 프레임 시각(동기화 기준)을 finalize 로 넘긴다
+        video_starts = {
+            cam_id: rec.first_frame_at
+            for cam_id, rec in STATE["recorders"].items()
+        }
         folder = sess.finalize(
             RECORDINGS_DIR, STATE["tmp"], STATE["start"], end_at,
-            list(CAMERAS.keys()),
+            list(CAMERAS.keys()), video_starts,
         )
         STATE.clear()
         name = os.path.basename(folder)
