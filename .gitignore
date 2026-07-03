@@ -9,11 +9,9 @@ nas_*
 recordings/
 logs/
 
-# --- 대용량 바이너리 (직접 내려받는 것, 저장소에 넣지 않음) ---
-go2rtc.exe
-ffmpeg.exe
-*.exe
+# --- VPN 설정(비밀) 제외 ---
 *.ovpn
+# 참고: go2rtc.exe / ffmpeg.exe 는 "클론 후 바로 실행" 목적으로 저장소에 포함(대용량).
 
 # --- Python ---
 __pycache__/
